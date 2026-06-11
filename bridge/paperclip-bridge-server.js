@@ -65,7 +65,7 @@ function storeSetCookies(res) {
 async function login() {
   cookieJar = {};
   const r = await fetch(API + '/api/auth/sign-in/email', {
-    method: 'POST', headers: { 'content-type': 'application/json' },
+    method: 'POST', headers: { 'content-type': 'application/json', origin: API },
     body: JSON.stringify({ email: EMAIL, password: PASS })
   });
   storeSetCookies(r);
@@ -74,7 +74,7 @@ async function login() {
 }
 async function pcFetch(p, opts = {}, retry = true) {
   const r = await fetch(API + p, { ...opts,
-    headers: { 'content-type': 'application/json', cookie: cookieHeader(), ...(opts.headers || {}) } });
+    headers: { 'content-type': 'application/json', origin: API, cookie: cookieHeader(), ...(opts.headers || {}) } });
   storeSetCookies(r);
   if (r.status === 401 && retry) { await login(); return pcFetch(p, opts, false); }
   return r;
