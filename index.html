@@ -1585,7 +1585,7 @@ const _origPush=pushEvent;
 window.pushEvent=function(e){_origPush(e);
  if(houseVoices&&e&&e.message&&e.agent&&!speechBusy&&speechQueue.length===0)
   enqueue(String(e.agent),String(e.message));};
-let ws=null;const wsBtn=document.getElementById('wsBtn'),wsUrl=document.getElementById('wsUrl');
+let ws=null,wsWant=false,wsRetryT=null;const wsBtn=document.getElementById('wsBtn'),wsUrl=document.getElementById('wsUrl');
 function wsSend(o){if(ws&&ws.readyState===1){try{ws.send(JSON.stringify(o));return true;}catch(e){}}return false;}
 function handleAssignResult(r){
  const a=agents.get(r.agent);
@@ -1597,16 +1597,19 @@ function handleAssignResult(r){
  }
 }
 function connectWS(){
- if(ws){ws.close();return;}
- const url=wsUrl.value.trim();if(!url)return;setStatus('','connecting…');
+ if(ws){wsWant=false;clearTimeout(wsRetryT);ws.close();return;}
+ const url=wsUrl.value.trim();if(!url)return;wsWant=true;setStatus('','connecting…');
  try{ws=new WebSocket(url);}catch{setStatus('','bad url');return;}
  ws.onopen=()=>{setStatus('live','LIVE · '+url);wsBtn.textContent='Disconnect';};
  ws.onmessage=m=>{try{const d=JSON.parse(m.data);
   (Array.isArray(d)?d:[d]).forEach(x=>{
    if(x&&x.type==='assign_result')handleAssignResult(x);
    else pushEvent(x);});}catch{}};
- ws.onclose=()=>{setStatus('','disconnected');wsBtn.textContent='Connect';ws=null;};
- ws.onerror=()=>setStatus('','connection error — is the bridge running?');
+ ws.onclose=()=>{wsBtn.textContent='Connect';ws=null;
+  if(wsWant){setStatus('','reconnecting…');
+   clearTimeout(wsRetryT);wsRetryT=setTimeout(()=>{if(wsWant&&!ws)connectWS();},4000);}
+  else setStatus('','disconnected');};
+ ws.onerror=()=>setStatus('','connection error — retrying…');
 }
 wsBtn.onclick=connectWS;
 /* share one link: dashboard.html?ws=ws://YOUR-IP:8787 auto-connects */
