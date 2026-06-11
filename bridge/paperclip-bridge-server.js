@@ -118,7 +118,7 @@ async function createTask(agentName, title, description) {
   const desc = description || ('Assigned to ' + agentName + ' from Agent House (founder dashboard).');
   const base = { title, description: desc };
   const bodies = [];
-  if (aid) bodies.push({ ...base, assigneeId: aid }, { ...base, agentId: aid },
+  if (aid) bodies.push({ ...base, assigneeAgentId: aid, status: 'todo' }, { ...base, assigneeId: aid }, { ...base, agentId: aid },
                        { ...base, assigneeAgentId: aid }, { ...base, assignee: aid });
   bodies.push({ ...base });
   const paths = [];
