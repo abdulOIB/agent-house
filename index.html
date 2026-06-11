@@ -331,7 +331,8 @@ function pushEvent(e){
   case 'blocked':{a.st='blocked';
    if(S2){S2.blocked++;S2.reasons.unshift({r:e.message||'unknown reason',t:Date.now()});S2.reasons=S2.reasons.slice(0,12);}
    feedAll.unshift({type:'block',who:a.n,c:a.c,txt:e.message||'blocked',t:Date.now()});
-   routeTo(a,YOU.x+50,YOU.fy);break;}
+   const qIx=[...agents.keys()].indexOf(a.n);
+   routeTo(a,YOU.x+46+((qIx<0?0:qIx)%6)*40,YOU.fy);break;}
   case 'done':{a.st='done';
    if(S2){S2.done++;S2.subs.unshift({task:a.curTask||e.message||'task',t:Date.now()});S2.subs=S2.subs.slice(0,12);}
    feedAll.unshift({type:'done',who:a.n,c:a.c,txt:a.curTask||e.message||'task',t:Date.now()});
