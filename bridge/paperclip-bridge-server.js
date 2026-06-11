@@ -42,6 +42,13 @@ wss.on('connection', (ws, req) => {
   console.log('[bridge] dashboard connected ✔  (' + clients.size + ' online)');
   ws.send(JSON.stringify({ agent: 'CEO', state: 'communicating',
     message: 'Bridge online. Watching ' + PAPERCLIP_DIR + (API ? ' · assignments enabled' : '') }));
+  /* replay current real states so a refreshed dashboard is instantly truthful */
+  try {
+    const snap = [...agentLive.entries()]
+      .filter(([, v]) => v && v.st && v.st !== 'idle')
+      .map(([agent, v]) => ({ agent, state: v.st === 'done' ? 'idle' : v.st, message: v.msg }));
+    if (snap.length) ws.send(JSON.stringify(snap));
+  } catch {}
   ws.on('close', () => clients.delete(ws));
   ws.on('message', raw => handleClientMessage(ws, raw));
 });
