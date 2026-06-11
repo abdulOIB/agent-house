@@ -1,17 +1,20 @@
-# bridge/docker-compose.yml — Agent House bridge (final)
-# Watches Paperclip's data (read-only), serves events at
-# wss://bridge.srv1505808.hstgr.cloud via the existing Traefik.
+# bridge/docker-compose.yml — Agent House bridge (v2, two-way)
+# Watches Paperclip's data (read-only) AND creates real tasks via its API.
 #
-# Run from inside agent-house/bridge:
-#   echo "BRIDGE_KEY=your-long-secret" > .env
-#   docker compose up -d
-#   docker logs -f agent-house-bridge
+# .env next to this file needs:
+#   BRIDGE_KEY=your-long-secret
+#   PAPERCLIP_EMAIL=abdulrahman@oib-media.com
+#   PAPERCLIP_PASSWORD=your-paperclip-login-password
+#
+# Run:  docker compose up -d --force-recreate && docker logs -f agent-house-bridge
 
 services:
   bridge:
     image: node:20-alpine
     container_name: agent-house-bridge
     working_dir: /app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./:/app
       - /docker/paperclip-sg7b/data:/data/paperclip:ro
@@ -19,6 +22,11 @@ services:
       - BRIDGE_KEY=${BRIDGE_KEY}
       - PAPERCLIP_DIR=/data/paperclip
       - PORT=8787
+      - PAPERCLIP_API=${PAPERCLIP_API:-http://host.docker.internal:45799}
+      - PAPERCLIP_EMAIL=${PAPERCLIP_EMAIL}
+      - PAPERCLIP_PASSWORD=${PAPERCLIP_PASSWORD}
+      - PAPERCLIP_COMPANY=${PAPERCLIP_COMPANY:-OIB}
+      - ASSIGN_PATH=${ASSIGN_PATH:-}
     command: sh -c "npm install --omit=dev && node paperclip-bridge-server.js"
     restart: unless-stopped
     labels:
