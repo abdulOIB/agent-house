@@ -233,6 +233,65 @@ if (!watching) {
   scan(PAPERCLIP_DIR, 0);
   setInterval(() => scan(PAPERCLIP_DIR, 0), 2000);
 }
+
+/* ---------------- LIVE STATE POLLING (v3) ----------------
+   Polls Paperclip's issues API and broadcasts real agent states:
+   activeRun/in_progress -> working, blocked -> blocked,
+   in_review -> communicating, transition to done -> done (sleep). */
+const POLL_MS = parseInt(process.env.POLL_MS || '4000', 10);
+const issueStatus = new Map();   // issueId -> last seen status
+const agentLive = new Map();     // agentName -> {st, msg}
+const lbl = is => ((is.identifier ? is.identifier + ' — ' : '') + (is.title || '')).slice(0, 90);
+async function pollLiveState() {
+  try {
+    if (!companyCache) companyCache = await getCompany();
+    const cid = companyCache.id || companyCache.companyId || companyCache.slug;
+    if (!agentsCache || !agentsCache.length) agentsCache = await getAgents(cid);
+    const r = await pcFetch('/api/companies/' + cid + '/issues');
+    if (!r.ok) { if (r.status === 401) await login(); return; }
+    const j = await r.json();
+    const arr = Array.isArray(j) ? j : (j.issues || j.data || []);
+    const idToName = new Map(agentsCache.map(a => [a.id || a.agentId, a.name]));
+    const buckets = new Map();   // name -> {run, prog, blocked, review}
+    for (const is of arr) {
+      const prev = issueStatus.get(is.id);
+      issueStatus.set(is.id, is.status);
+      const name = idToName.get(is.assigneeAgentId);
+      if (!name) continue;
+      if (prev && prev !== is.status && is.status === 'done') {
+        broadcast({ agent: name, state: 'done', message: lbl(is) });
+        agentLive.set(name, { st: 'done', msg: lbl(is) });
+      }
+      const b = buckets.get(name) || {};
+      if (is.activeRun) b.run = is;
+      else if (is.status === 'in_progress') b.prog = b.prog || is;
+      else if (is.status === 'blocked') b.blocked = b.blocked || is;
+      else if (is.status === 'in_review') b.review = b.review || is;
+      buckets.set(name, b);
+    }
+    for (const a of agentsCache) {
+      const name = a.name;
+      const b = buckets.get(name) || {};
+      let st = 'idle', msg;
+      if (b.run) { st = 'working'; msg = lbl(b.run); }
+      else if (b.prog) { st = 'working'; msg = lbl(b.prog); }
+      else if (b.blocked) { st = 'blocked'; msg = lbl(b.blocked); }
+      else if (b.review) { st = 'communicating'; msg = 'waiting for review: ' + lbl(b.review); }
+      const prev = agentLive.get(name);
+      if (prev && prev.st === 'done' && st === 'idle') continue;     // let them sleep
+      if (!prev && st === 'idle') { agentLive.set(name, { st, msg }); continue; }  // no idle spam at boot
+      if (!prev || prev.st !== st || (st === 'working' && msg !== prev.msg)) {
+        agentLive.set(name, { st, msg });
+        broadcast({ agent: name, state: st, message: msg });
+      }
+    }
+  } catch (e) { console.log('[poll] ' + e.message); }
+}
+if (API && EMAIL && PASS) {
+  setInterval(pollLiveState, POLL_MS);
+  setTimeout(pollLiveState, 2500);
+  console.log('[bridge] live state polling every ' + POLL_MS + 'ms');
+}
 console.log('[bridge] Watching', PAPERCLIP_DIR);
 console.log('[bridge] WebSocket on port ' + PORT + (KEY ? '  (key required)' : '  (NO KEY)'));
 console.log('[bridge] Assignments: ' + (API && EMAIL ? 'ENABLED -> ' + API : 'disabled (set PAPERCLIP_API/EMAIL/PASSWORD)'));
