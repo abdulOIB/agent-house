@@ -1,0 +1,13 @@
+{
+  "name": "agent-house-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Watches Paperclip's data folder and streams agent events to the Agent House dashboard",
+  "main": "paperclip-bridge-server.js",
+  "scripts": {
+    "start": "node paperclip-bridge-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
