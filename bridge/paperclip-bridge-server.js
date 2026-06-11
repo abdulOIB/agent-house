@@ -178,6 +178,7 @@ function guessAgent(filePath, obj) {
   return AGENTS.find(a => lower.includes(a.toLowerCase())) || null;
 }
 function mapChange(filePath) {
+  if (filePath.includes('.claude')) return;   // session/log noise, not task state
   if (!filePath.endsWith('.json') && !filePath.endsWith('.jsonl')) return;
   let raw; try { raw = fs.readFileSync(filePath, 'utf8'); } catch { return; }
   let obj = null;
