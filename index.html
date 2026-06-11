@@ -189,10 +189,32 @@
    Tab 3 TEAM: live animated face cards + assign tasks (wakes them up).
    ===================================================================== */
 const canvas=document.getElementById('c'),X=canvas.getContext('2d'),stage=document.getElementById('stage');
-const W=1280,H=900; let scale=1,ox=0,oy=0,dpr=1,lw=0,lh=0;
+const W=1280,H=900; let scale=1,ox=0,oy=0,dpr=1,lw=0,lh=0,zoom=1,panX=0,panY=0;
 function resize(){dpr=Math.min(devicePixelRatio||1,2);const r=stage.getBoundingClientRect();
  canvas.width=r.width*dpr;canvas.height=r.height*dpr;
- scale=Math.min(r.width/W,r.height/H);ox=(r.width-W*scale)/2;oy=(r.height-H*scale)/2;}
+ const base=Math.min(r.width/W,r.height/(H-70));
+ scale=base*zoom;
+ const ox0=(r.width-W*scale)/2;
+ const oy0=(H*scale<=r.height)?(r.height-H*scale)/2:(r.height-H*scale);
+ if(W*scale>r.width)panX=Math.max(r.width-W*scale-ox0,Math.min(-ox0,panX));else panX=0;
+ if(H*scale>r.height)panY=Math.max(r.height-H*scale-oy0,Math.min(-oy0,panY));else panY=0;
+ ox=ox0+panX;oy=oy0+panY;}
+/* scroll = zoom toward cursor · drag = pan · double-click = reset */
+stage.addEventListener('wheel',e=>{e.preventDefault();
+ const r=stage.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+ const wx=(mx-ox)/scale,wy=(my-oy)/scale;
+ zoom=Math.max(1,Math.min(3,zoom*(e.deltaY<0?1.13:0.885)));
+ if(zoom<=1.001){zoom=1;panX=0;panY=0;resize();return;}
+ const base=Math.min(r.width/W,r.height/(H-70)),ns=base*zoom;
+ const ox0=(r.width-W*ns)/2;
+ const oy0=(H*ns<=r.height)?(r.height-H*ns)/2:(r.height-H*ns);
+ panX=(mx-wx*ns)-ox0;panY=(my-wy*ns)-oy0;resize();},{passive:false});
+let dragP=null;
+stage.addEventListener('pointerdown',e=>{if(zoom>1){dragP={x:e.clientX,y:e.clientY};stage.setPointerCapture(e.pointerId);stage.style.cursor='grabbing';}});
+stage.addEventListener('pointermove',e=>{if(dragP){panX+=e.clientX-dragP.x;panY+=e.clientY-dragP.y;dragP={x:e.clientX,y:e.clientY};resize();}});
+const endDrag=e=>{dragP=null;stage.style.cursor=zoom>1?'grab':'default';};
+stage.addEventListener('pointerup',endDrag);stage.addEventListener('pointercancel',endDrag);
+stage.addEventListener('dblclick',()=>{zoom=1;panX=0;panY=0;resize();stage.style.cursor='default';});
 addEventListener('resize',resize);
 
 /* ---------- structure ---------- */
@@ -1015,6 +1037,12 @@ function frame(now){
   const r=stage.getBoundingClientRect();
   if(r.width!==lw||r.height!==lh){lw=r.width;lh=r.height;resize();}
   X.setTransform(dpr,0,0,dpr,0,0);X.clearRect(0,0,canvas.width,canvas.height);
+  /* full-stage backdrop: extend sky + earth to the edges (no letterbox bars) */
+  {const sg=X.createLinearGradient(0,oy,0,oy+H*scale);
+   sg.addColorStop(0,'#171b33');sg.addColorStop(0.5,'#232040');sg.addColorStop(1,'#141015');
+   X.fillStyle=sg;X.fillRect(0,0,lw,lh);
+   X.fillStyle='#2e2218';X.fillRect(0,oy+(FY.f1+FD)*scale,lw,lh);
+   X.fillStyle='#241a12';X.fillRect(0,oy+(FY.base+FD+2)*scale,lw,lh);}
   X.save();X.translate(ox,oy);X.scale(scale,scale);
   drawSky(now);
   ROOMS.forEach(rm=>drawRoomShell(rm,now));
