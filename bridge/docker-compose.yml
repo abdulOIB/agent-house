@@ -1,0 +1,39 @@
+# bridge/docker-compose.yml — Agent House bridge behind your existing Traefik
+#
+# FILL IN before `docker compose up -d`:
+#   1) YOURDOMAIN.com        -> your real domain (DNS A record: bridge -> 168.231.67.163)
+#   2) TRAEFIK_NETWORK_NAME  -> from: docker inspect traefik-traefik-1 --format '{{json .NetworkSettings.Networks}}'
+#   3) PAPERCLIP_DATA_PATH   -> from: docker inspect <paperclip-container> --format '{{json .Mounts}}'  (the "Source")
+#   4) BRIDGE_KEY            -> export BRIDGE_KEY=your-long-secret   (or create a .env file next to this)
+#
+# Run from inside the bridge/ folder of the cloned repo:
+#   BRIDGE_KEY=your-long-secret docker compose up -d
+#   docker logs -f agent-house-bridge        # watch for [discovery] lines
+
+services:
+  bridge:
+    image: node:20-alpine
+    container_name: agent-house-bridge
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - PAPERCLIP_DATA_PATH:/data/paperclip:ro
+    environment:
+      - BRIDGE_KEY=${BRIDGE_KEY}
+      - PAPERCLIP_DIR=/data/paperclip
+      - PORT=8787
+    command: sh -c "npm install --omit=dev && node paperclip-bridge-server.js"
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.agentbridge.rule=Host(`bridge.YOURDOMAIN.com`)
+      - traefik.http.routers.agentbridge.entrypoints=websecure
+      - traefik.http.routers.agentbridge.tls.certresolver=letsencrypt
+      - traefik.http.services.agentbridge.loadbalancer.server.port=8787
+    networks:
+      - traefik-net
+
+networks:
+  traefik-net:
+    external: true
+    name: TRAEFIK_NETWORK_NAME
