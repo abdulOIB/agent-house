@@ -1161,8 +1161,14 @@ function buildTeamCards(){
   faceCtx[n]=card.querySelector('canvas').getContext('2d');
   const inp=card.querySelector('.assign input[type=text]'),btn=card.querySelector('.assign button');
   const assign=()=>{const v=inp.value.trim();if(!v)return;
-   pushEvent({agent:n,state:'working',message:v});inp.value='';
-   btn.textContent='Assigned ✓';setTimeout(()=>btn.textContent='Assign ▶',1400);};
+   if(wsSend({cmd:'assign',agent:n,title:v})){
+    btn.textContent='Sending → Paperclip…';
+    log({agent:n,state:'communicating'},a.c,'📤 assignment sent to Paperclip: "'+v+'"');
+   }else{
+    pushEvent({agent:n,state:'working',message:v});
+    btn.textContent='Assigned ✓ (visual only — connect bridge for real)';
+   }
+   inp.value='';setTimeout(()=>btn.textContent='Assign ▶',2600);};
   btn.onclick=assign;inp.addEventListener('keydown',e=>{if(e.key==='Enter')assign();});
   const fbtn=card.querySelector('.facebtn'),fclr=card.querySelector('.faceclr'),
    finp=card.querySelector('input[type=file]');
@@ -1443,6 +1449,22 @@ function respondToYou(t){
  const lo=t.toLowerCase();
  log({agent:'You',state:'communicating'},'#ef6651','said: '+t);
  setCap('You',t);
+ /* --- voice task assignment: "VideoEditor, edit the launch video" /
+        "assign LPBuilder to fix the pricing page" --- */
+ const aHit=ROSTER.find(n=>lo.includes(n.toLowerCase())||lo.includes(dispName(n).toLowerCase()));
+ if(aHit){
+  const names=[aHit.toLowerCase(),dispName(aHit).toLowerCase()];
+  let idx=-1,len=0;
+  names.forEach(nm=>{const i=lo.indexOf(nm);if(i>-1&&(idx===-1||i<idx)){idx=i;len=nm.length;}});
+  const after=t.slice(idx+len).replace(/^[\s,:.\-]+(to\s+|please\s+)?/i,'').trim();
+  const wantsTask=/\b(assign|task|create|make|build|write|edit|fix|design|do|prepare|start)\b/.test(lo);
+  if(after.length>4&&(wantsTask||after.split(/\s+/).length>=3)){
+   if(wsSend({cmd:'assign',agent:aHit,title:after})){
+    enqueue(aHit,'Got it. Creating the task: '+after);
+    return;
+   }
+  }
+ }
  const hit=ROSTER.find(n=>lo.includes(n.toLowerCase())||lo.includes(dispName(n).toLowerCase()));
  if(hit){const a=agents.get(hit);
   let line=a.st==='blocked'?'Yes! I am blocked. '+(a.msg||'Help me.'):
@@ -1564,12 +1586,25 @@ window.pushEvent=function(e){_origPush(e);
  if(houseVoices&&e&&e.message&&e.agent&&!speechBusy&&speechQueue.length===0)
   enqueue(String(e.agent),String(e.message));};
 let ws=null;const wsBtn=document.getElementById('wsBtn'),wsUrl=document.getElementById('wsUrl');
+function wsSend(o){if(ws&&ws.readyState===1){try{ws.send(JSON.stringify(o));return true;}catch(e){}}return false;}
+function handleAssignResult(r){
+ const a=agents.get(r.agent);
+ if(r.ok){
+  log({agent:r.agent,state:'done'},a?a.c:'#8fce6b','✅ REAL task created in Paperclip: "'+r.title+'"');
+  if(curTab==='meeting')enqueue(r.agent,'Task received. On it, boss.');
+ }else{
+  log({agent:r.agent,state:'blocked'},'#ef6651','⚠️ Task not created: '+(r.info||'unknown error'));
+ }
+}
 function connectWS(){
  if(ws){ws.close();return;}
  const url=wsUrl.value.trim();if(!url)return;setStatus('','connecting…');
  try{ws=new WebSocket(url);}catch{setStatus('','bad url');return;}
  ws.onopen=()=>{setStatus('live','LIVE · '+url);wsBtn.textContent='Disconnect';};
- ws.onmessage=m=>{try{const d=JSON.parse(m.data);(Array.isArray(d)?d:[d]).forEach(pushEvent);}catch{}};
+ ws.onmessage=m=>{try{const d=JSON.parse(m.data);
+  (Array.isArray(d)?d:[d]).forEach(x=>{
+   if(x&&x.type==='assign_result')handleAssignResult(x);
+   else pushEvent(x);});}catch{}};
  ws.onclose=()=>{setStatus('','disconnected');wsBtn.textContent='Connect';ws=null;};
  ws.onerror=()=>setStatus('','connection error — is the bridge running?');
 }
