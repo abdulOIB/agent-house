@@ -76,7 +76,7 @@ async function pcFetch(p, opts = {}, retry = true) {
   const r = await fetch(API + p, { ...opts,
     headers: { 'content-type': 'application/json', origin: API, cookie: cookieHeader(), ...(opts.headers || {}) } });
   storeSetCookies(r);
-  if (r.status === 401 && retry) { await login(); return pcFetch(p, opts, false); }
+  if ((r.status === 401 || r.status === 403) && retry) { await login(); return pcFetch(p, opts, false); }
   return r;
 }
 async function getCompany() {
