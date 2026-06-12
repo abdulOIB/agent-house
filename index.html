@@ -1499,7 +1499,12 @@ function respondToYou(t){
   let line=a.st==='blocked'?'Yes! I am blocked. '+(a.msg||'Help me.'):
    a.st==='working'?'I heard my name. I am working on '+(a.curTask||'something important')+'. I swear.':
    a.st==='sleeping'?'...Five more minutes.':'Yes boss? I was definitely not slacking.';
-  enqueue(hit,line);return;}
+  /* in-character reply via bridge LLM (their real Paperclip instructions); canned fallback */
+  if(wsSend({cmd:'say',agent:hit,topic:'The founder just said to you: "'+t+'". Current status: '+a.st+(a.curTask?' on '+a.curTask:'')+'. Reply in one spoken line.'})){
+   pendingSay.set(hit,{f:line,timer:setTimeout(()=>{const p=pendingSay.get(hit);
+    if(p){pendingSay.delete(hit);enqueue(hit,p.f);}},9000)});
+  }else enqueue(hit,line);
+  return;}
  if(/status|update|standup|report/.test(lo)){
   enqueue('CEO','You heard the founder. Status reports. Again. Go.');
   const n=pick(ROSTER.filter(x=>x!=='CEO'));const a=agents.get(n);
@@ -1615,6 +1620,13 @@ window.pushEvent=function(e){_origPush(e);
  if(houseVoices&&e&&e.message&&e.agent&&!speechBusy&&speechQueue.length===0)
   enqueue(String(e.agent),String(e.message));};
 let ws=null,wsWant=false,wsRetryT=null;const wsBtn=document.getElementById('wsBtn'),wsUrl=document.getElementById('wsUrl');
+const pendingSay=new Map();
+function handleSpeech(x){
+ const p=pendingSay.get(x.agent);
+ if(p){clearTimeout(p.timer);pendingSay.delete(x.agent);}
+ if(x.text)enqueue(x.agent,x.text);
+ else if(p)enqueue(x.agent,p.f);
+}
 function wsSend(o){if(ws&&ws.readyState===1){try{ws.send(JSON.stringify(o));return true;}catch(e){}}return false;}
 function handleAssignResult(r){
  const a=agents.get(r.agent);
@@ -1633,6 +1645,7 @@ function connectWS(){
  ws.onmessage=m=>{try{const d=JSON.parse(m.data);
   (Array.isArray(d)?d:[d]).forEach(x=>{
    if(x&&x.type==='assign_result')handleAssignResult(x);
+   else if(x&&x.type==='speech')handleSpeech(x);
    else pushEvent(x);});}catch{}};
  ws.onclose=()=>{wsBtn.textContent='Connect';ws=null;
   if(wsWant){setStatus('','reconnecting…');
