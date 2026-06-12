@@ -30,7 +30,32 @@ const AGENTS = (process.env.AGENTS || 'CEO,Copywriter,CTO,Designer,LandingPageBu
   .split(',').map(s => s.trim()).filter(Boolean);
 
 /* ---------------- websocket server with key auth ---------------- */
-const wss = new WebSocketServer({ port: PORT });
+const http = require('http');
+const STUDIO_EXT = { '.mp4':'video/mp4', '.webm':'video/webm', '.mp3':'audio/mpeg', '.wav':'audio/wav',
+  '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.gif':'image/gif',
+  '.txt':'text/plain', '.json':'application/json', '.srt':'text/plain', '.md':'text/plain' };
+const WORKSPACES_DIR = () => PAPERCLIP_DIR + '/instances/default/workspaces';
+const httpServer = http.createServer((req, res) => {
+  try {
+    const u = new URL(req.url, 'http://x');
+    if (u.pathname !== '/asset') { res.writeHead(404); return res.end('not found'); }
+    if (KEY && u.searchParams.get('key') !== KEY) { res.writeHead(403); return res.end('bad key'); }
+    const rel = (u.searchParams.get('path') || '').replace(/\\/g, '/');
+    if (!rel || rel.includes('..')) { res.writeHead(400); return res.end('bad path'); }
+    const full = require('path').join(WORKSPACES_DIR(), rel);
+    if (!full.startsWith(WORKSPACES_DIR())) { res.writeHead(400); return res.end('bad path'); }
+    const ext = require('path').extname(full).toLowerCase();
+    const mime = STUDIO_EXT[ext] || 'application/octet-stream';
+    fs.stat(full, (err, st) => {
+      if (err || !st.isFile()) { res.writeHead(404); return res.end('missing'); }
+      res.writeHead(200, { 'content-type': mime, 'content-length': st.size,
+        'access-control-allow-origin': '*', 'cache-control': 'no-cache' });
+      fs.createReadStream(full).pipe(res);
+    });
+  } catch (e) { res.writeHead(500); res.end('err'); }
+});
+const wss = new WebSocketServer({ server: httpServer });
+httpServer.listen(PORT);
 const clients = new Set();
 wss.on('connection', (ws, req) => {
   if (KEY) {
@@ -206,6 +231,38 @@ async function characterLine(agent, topic) {
 
 async function handleClientMessage(ws, raw) {
   let m; try { m = JSON.parse(raw); } catch { return; }
+  if (m && m.cmd === 'studio_state') {
+    try {
+      const snap = { type: 'studio', kind: 'snapshot', timeline: studioTimeline,
+        assets: [...studioAssets.entries()].map(([file, v]) => ({ file, name: file.split('/').pop(), size: v.size })) };
+      ws.send(JSON.stringify(snap));
+    } catch {}
+    return;
+  }
+  if (m && m.cmd === 'studio_comment' && m.text) {
+    try {
+      if (!cookieHeader()) await login();
+      if (!companyCache) companyCache = await getCompany();
+      const cid = companyCache.id || companyCache.companyId;
+      if (!agentsCache || !agentsCache.length) agentsCache = await getAgents(cid);
+      const ve = agentsCache.find(a => /video/i.test(a.name || ''));
+      const aid = ve && (ve.id || ve.agentId);
+      const r = await pcFetch('/api/companies/' + cid + '/issues?assigneeAgentId=' + aid + '&status=in_progress,in_review,todo');
+      const j = await r.json();
+      const arr = Array.isArray(j) ? j : (j.issues || j.data || []);
+      arr.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+      const target = arr[0];
+      if (!target) { ws.send(JSON.stringify({ type: 'studio', kind: 'comment_result', ok: false, info: 'no active VideoEditor issue' })); return; }
+      const cr = await pcFetch('/api/issues/' + target.id + '/comments', {
+        method: 'POST', body: JSON.stringify({ body: String(m.text).slice(0, 2000) }) });
+      ws.send(JSON.stringify({ type: 'studio', kind: 'comment_result', ok: cr.ok,
+        info: (target.identifier || '') + (cr.ok ? '' : ' HTTP ' + cr.status) }));
+      console.log('[studio] comment -> ' + (target.identifier || target.id) + ' ' + cr.status);
+    } catch (e) {
+      try { ws.send(JSON.stringify({ type: 'studio', kind: 'comment_result', ok: false, info: e.message })); } catch {}
+    }
+    return;
+  }
   if (m && m.cmd === 'say' && m.agent) {
     const agent = String(m.agent), topic = String(m.topic || 'Give a quick status update.').slice(0, 400);
     if (!LLM_BASE || !LLM_KEY) { try { ws.send(JSON.stringify({ type: 'speech', agent, text: '', error: 'no LLM configured' })); } catch {} return; }
@@ -245,7 +302,49 @@ function guessAgent(filePath, obj) {
   const lower = filePath.toLowerCase();
   return AGENTS.find(a => lower.includes(a.toLowerCase())) || null;
 }
+/* ---------------- STUDIO: live edit-bay feed (v1) ---------------- */
+let studioAgentDir = null;   // workspaces/<videoEditorAgentId>
+let studioTimeline = null;
+const studioAssets = new Map();   // relPath -> {size, t}
+function studioResolveDir() {
+  if (studioAgentDir || !agentsCache) return;
+  const ve = agentsCache.find(a => /video/i.test(a.name || ''));
+  if (ve) { studioAgentDir = (ve.id || ve.agentId); console.log('[studio] watching workspace of ' + ve.name); }
+}
+function studioCheck(filePath) {
+  studioResolveDir();
+  if (!studioAgentDir) return false;
+  const marker = 'workspaces/' + studioAgentDir + '/';
+  const i = filePath.indexOf(marker);
+  if (i === -1) return false;
+  const rel = filePath.slice(filePath.indexOf('workspaces/') + 'workspaces/'.length);
+  const base = filePath.split('/').pop();
+  if (base === 'timeline.json') {
+    try {
+      const t = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      studioTimeline = t;
+      broadcast({ type: 'studio', kind: 'timeline', timeline: t });
+      console.log('[studio] timeline updated (' + ((t.tracks || []).length) + ' tracks)');
+    } catch {}
+    return true;
+  }
+  const ext = require('path').extname(base).toLowerCase();
+  if (STUDIO_EXT[ext]) {
+    try {
+      const st = fs.statSync(filePath);
+      const prev = studioAssets.get(rel);
+      if (!prev || prev.size !== st.size) {
+        studioAssets.set(rel, { size: st.size, t: Date.now() });
+        broadcast({ type: 'studio', kind: 'asset', file: rel, name: base, size: st.size });
+        console.log('[studio] asset: ' + base + ' (' + st.size + 'b)');
+      }
+    } catch {}
+    return true;
+  }
+  return false;
+}
 function mapChange(filePath) {
+  if (studioCheck(filePath)) return;
   if (filePath.includes('.claude')) return;   // session/log noise, not task state
   if (!filePath.endsWith('.json') && !filePath.endsWith('.jsonl')) return;
   let raw; try { raw = fs.readFileSync(filePath, 'utf8'); } catch { return; }
