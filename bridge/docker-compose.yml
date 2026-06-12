@@ -27,6 +27,9 @@ services:
       - PAPERCLIP_PASSWORD=${PAPERCLIP_PASSWORD}
       - PAPERCLIP_COMPANY=${PAPERCLIP_COMPANY:-OIB}
       - ASSIGN_PATH=${ASSIGN_PATH:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-MiniMax-M2.7}
     command: sh -c "npm install --omit=dev && node paperclip-bridge-server.js"
     restart: unless-stopped
     labels:
