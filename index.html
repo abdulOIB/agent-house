@@ -1486,8 +1486,9 @@ function respondToYou(t){
   let idx=-1,len=0;
   names.forEach(nm=>{const i=lo.indexOf(nm);if(i>-1&&(idx===-1||i<idx)){idx=i;len=nm.length;}});
   const after=t.slice(idx+len).replace(/^[\s,:.\-]+(to\s+|please\s+)?/i,'').trim();
-  const wantsTask=/\b(assign|task|create|make|build|write|edit|fix|design|do|prepare|start)\b/.test(lo);
-  if(after.length>4&&(wantsTask||after.split(/\s+/).length>=3)){
+  const isQuestion=/\?|^(how|what|why|when|where|who|are|is|do|does|did|can you tell|how's|whats|hows)\b/i.test(after)||/\?\s*$/.test(t);
+  const wantsTask=/\b(assign|task|create|make|build|write|edit|fix|design|prepare|start|draft|generate|post|publish|sketch|produce)\b/i.test(after);
+  if(!isQuestion&&wantsTask&&after.length>4){
    if(wsSend({cmd:'assign',agent:aHit,title:after})){
     enqueue(aHit,'Got it. Creating the task: '+after);
     return;
