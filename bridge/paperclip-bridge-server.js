@@ -123,7 +123,13 @@ async function createTask(agentName, title, description) {
   const ag = agentsCache.find(a => String(a.name || '').toLowerCase() === agentName.toLowerCase());
   const aid = ag && (ag.id || ag.agentId);
   const desc = description || ('Assigned to ' + agentName + ' from Agent House (founder dashboard).');
-  const base = { title, description: desc };
+  /* Paperclip truncates long titles (~300 chars) — keep title short, put the FULL brief in the description */
+  const fullBrief = String(title || '');
+  const shortTitle = fullBrief.length > 110 ? fullBrief.slice(0, 110).trim() + '…' : fullBrief;
+  const fullDesc = fullBrief.length > 110
+    ? desc + '\n\n## Full brief (verbatim — follow ALL of it)\n\n' + fullBrief
+    : desc;
+  const base = { title: shortTitle, description: fullDesc };
   const bodies = [];
   if (aid) bodies.push({ ...base, assigneeAgentId: aid, status: 'todo' }, { ...base, assigneeId: aid }, { ...base, agentId: aid },
                        { ...base, assigneeAgentId: aid }, { ...base, assignee: aid });
