@@ -153,8 +153,63 @@ async function createTask(agentName, title, description) {
   console.log('         note the POST URL + JSON body, then set ASSIGN_PATH in .env and tell Claude the body shape.');
   return { ok: false, error: 'No API route accepted the task (' + attempts.join(' | ') + ')' };
 }
+
+/* ---------------- in-character meeting speech (v4) ----------------
+   Reads each agent's AGENTS.md from Paperclip's data dir and asks the
+   LLM (MiniMax via Anthropic-compatible API) for one in-character line. */
+const LLM_BASE  = process.env.ANTHROPIC_BASE_URL || '';
+const LLM_KEY   = process.env.ANTHROPIC_AUTH_TOKEN || '';
+const LLM_MODEL = process.env.ANTHROPIC_MODEL || 'MiniMax-M2.7';
+const personas = new Map();
+let personasLoaded = false;
+async function loadPersonas() {
+  if (personasLoaded) return;
+  try {
+    if (!companyCache) companyCache = await getCompany();
+    const cid = companyCache.id || companyCache.companyId;
+    if (!agentsCache || !agentsCache.length) agentsCache = await getAgents(cid);
+    for (const a of agentsCache) {
+      const p = PAPERCLIP_DIR + '/instances/default/companies/' + cid +
+        '/agents/' + (a.id || a.agentId) + '/instructions/AGENTS.md';
+      try { personas.set(a.name, fs.readFileSync(p, 'utf8').slice(0, 1800));
+        console.log('[persona] loaded ' + a.name); } catch {}
+    }
+    personasLoaded = true;
+    console.log('[persona] ' + personas.size + ' persona file(s) found');
+  } catch (e) { console.log('[persona] ' + e.message); }
+}
+async function characterLine(agent, topic) {
+  await loadPersonas();
+  const soul = personas.get(agent) || '';
+  const sys = 'You are ' + agent + ', an AI employee of OIB Media, speaking ONE short line ' +
+    '(max 30 words) out loud in a team standup. Stay in character, be conversational, a little ' +
+    'witty, never use markdown, lists, or stage directions.' +
+    (soul ? '\n\nYour role instructions (use their tone and personality):\n' + soul : '');
+  const r = await fetch(LLM_BASE + '/v1/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01',
+      authorization: 'Bearer ' + LLM_KEY },
+    body: JSON.stringify({ model: LLM_MODEL, max_tokens: 200, system: sys,
+      messages: [{ role: 'user', content: topic }] }) });
+  if (!r.ok) throw new Error('LLM ' + r.status);
+  const j = await r.json();
+  const text = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join(' ').trim();
+  if (!text) throw new Error('empty LLM reply');
+  return text.slice(0, 400);
+}
+
 async function handleClientMessage(ws, raw) {
   let m; try { m = JSON.parse(raw); } catch { return; }
+  if (m && m.cmd === 'say' && m.agent) {
+    const agent = String(m.agent), topic = String(m.topic || 'Give a quick status update.').slice(0, 400);
+    if (!LLM_BASE || !LLM_KEY) { try { ws.send(JSON.stringify({ type: 'speech', agent, text: '', error: 'no LLM configured' })); } catch {} return; }
+    try { const text = await characterLine(agent, topic);
+      ws.send(JSON.stringify({ type: 'speech', agent, text }));
+      console.log('[say] ' + agent + ': ' + text.slice(0, 80));
+    } catch (e) { console.log('[say] ' + e.message);
+      try { ws.send(JSON.stringify({ type: 'speech', agent, text: '', error: e.message })); } catch {} }
+    return;
+  }
   if (m && m.cmd === 'assign' && m.agent && m.title) {
     const agent = String(m.agent), title = String(m.title).slice(0, 300);
     console.log('[assign] request:', agent, '-', title);
